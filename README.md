@@ -161,6 +161,23 @@ endpoints:
       - GET
 ```
 
+### Nested JSON Parsing
+The bot automatically detects and parses nested JSON strings within your webhook payload. This is useful when services send JSON objects as string values.
+
+**Example:**
+```json
+{
+  "body": "{\"user\": {\"name\": \"John\", \"status\": \"online\"}, \"data\": {\"value\": 42}}",
+  "timestamp": "2024-01-01T12:00:00Z"
+}
+```
+
+With template: `${body.user.name} is ${body.user.status}`
+Result: `John is online`
+
+### Error Handling
+If there are any issues with JSON parsing or message formatting, the bot will send an error message to the Matrix room with the raw content wrapped in a code block, rather than failing silently. This helps with debugging webhook configurations.
+
 ### Troubleshooting
 Errors will be logged to the maubot log. Info logs are used to indicate startup and to track calls to the endpoints.
 
@@ -168,6 +185,8 @@ Errors will be logged to the maubot log. Info logs are used to indicate startup 
 - **POST requests**: Logs the raw request payload and parsed JSON structure
 - **GET requests**: Logs all query parameters (with token redacted for security)
 - **Message formatting**: Shows the final formatted message before sending to Matrix
+
+**Error Messages**: If JSON parsing or message formatting fails, the bot will send an error message to the Matrix room with the raw content, making it easier to debug issues.
 
 This makes it much easier to understand the structure of incoming webhook data and configure your templates accordingly.
 

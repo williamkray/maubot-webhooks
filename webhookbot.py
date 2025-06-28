@@ -93,13 +93,19 @@ class WebhookBot(Plugin):
 
         params = self.param_matcher.findall(template)
         msg_content = template
+        missing_vars = []
 
         for param_name in params:
             replacement = lookup(param_name)
             if replacement is None:
                 replacement = '(???)'
+                missing_vars.append(param_name)
             msg_content = msg_content.replace(f'${{{param_name}}}', replacement)
 
+        # If any variables are missing, return None to trigger error handling
+        if missing_vars:
+            return None
+        
         return msg_content
 
     @web.get("/{endpoint}")
@@ -147,6 +153,17 @@ class WebhookBot(Plugin):
             return value
 
         msg = self.format_message(endpoint, lookup)
+        if msg is None:
+            # Template variables are missing
+            missing_vars = []
+            for param_name in self.param_matcher.findall(endpoint.get('template', '')):
+                if req.query.get(param_name) is None:
+                    missing_vars.append(param_name)
+            
+            error_msg = f"Missing template variables: {', '.join(missing_vars)}\n\nQuery parameters:\n```\n{query_params}\n```"
+            await self._send_error_message(endpoint, endpoint_name, error_msg)
+            return Response(status=500)
+
         room = RoomID(endpoint.get('room_id'))
 
         # Debug: Log the final formatted message
@@ -172,8 +189,14 @@ class WebhookBot(Plugin):
                 data: dict = json.loads(data)
                 # Debug: Log the parsed JSON structure for easier template configuration
                 self.log.info(f"Parsed JSON structure for endpoint '{endpoint_name}': {json.dumps(data, indent=2)}")
+                
+                # Handle nested JSON strings in the parsed data
+                data = self._parse_nested_json(data)
+                
             except json.JSONDecodeError as e:
                 self.log.error(f"Invalid JSON payload for endpoint '{endpoint_name}': {e}")
+                # Send raw payload to Matrix instead of failing silently
+                await self._send_error_message(endpoint, endpoint_name, f"Invalid JSON payload: {e}\n\nRaw payload:\n```\n{data}\n```")
                 return Response(status=400, text="Invalid JSON payload")
 
             def lookup_json(key: str):
@@ -205,9 +228,34 @@ class WebhookBot(Plugin):
                     pointer = str(pointer)
                 return pointer
 
-            msg = self.format_message(endpoint, lookup_json)
+            try:
+                msg = self.format_message(endpoint, lookup_json)
+                if msg is None:
+                    # Template variables are missing
+                    missing_vars = []
+                    for param_name in self.param_matcher.findall(endpoint.get('template', '')):
+                        if lookup_json(param_name) is None:
+                            missing_vars.append(param_name)
+                    
+                    error_msg = f"Missing template variables: {', '.join(missing_vars)}\n\nParsed JSON:\n```json\n{json.dumps(data, indent=2)}\n```"
+                    await self._send_error_message(endpoint, endpoint_name, error_msg)
+                    return Response(status=500)
+            except Exception as e:
+                self.log.error(f"Error formatting message for endpoint '{endpoint_name}': {e}")
+                # Send raw JSON to Matrix instead of failing silently
+                await self._send_error_message(endpoint, endpoint_name, f"Error formatting message: {e}\n\nParsed JSON:\n```json\n{json.dumps(data, indent=2)}\n```")
+                return Response(status=500)
         else:
             msg = self.format_message(endpoint, lambda x: None)
+            if msg is None:
+                # Template variables are missing for non-JSON endpoints
+                missing_vars = []
+                for param_name in self.param_matcher.findall(endpoint.get('template', '')):
+                    missing_vars.append(param_name)
+                
+                error_msg = f"Missing template variables: {', '.join(missing_vars)}\n\nThis endpoint does not support template variables."
+                await self._send_error_message(endpoint, endpoint_name, error_msg)
+                return Response(status=500)
 
         # Debug: Log the final formatted message
         self.log.info(f"Formatted message for endpoint '{endpoint_name}': {msg}")
@@ -223,6 +271,52 @@ class WebhookBot(Plugin):
             return Response(status=500)
 
         return Response(status=200)
+
+    def _parse_nested_json(self, data: dict) -> dict:
+        """
+        Recursively parse nested JSON strings in the data structure.
+        This allows accessing nested JSON objects that are stored as strings.
+        """
+        if isinstance(data, dict):
+            result = {}
+            for key, value in data.items():
+                if isinstance(value, str):
+                    # Try to parse as JSON if it looks like valid JSON
+                    trimmed = value.strip()
+                    if (trimmed.startswith('{') and trimmed.endswith('}')) or (trimmed.startswith('[') and trimmed.endswith(']')):
+                        try:
+                            parsed = json.loads(value)
+                            result[key] = self._parse_nested_json(parsed)
+                            self.log.debug(f"Successfully parsed nested JSON for key '{key}'")
+                        except json.JSONDecodeError:
+                            # Not valid JSON, keep as string
+                            self.log.debug(f"String for key '{key}' looks like JSON but failed to parse, keeping as string")
+                            result[key] = value
+                    else:
+                        result[key] = value
+                elif isinstance(value, (dict, list)):
+                    result[key] = self._parse_nested_json(value)
+                else:
+                    result[key] = value
+            return result
+        elif isinstance(data, list):
+            return [self._parse_nested_json(item) for item in data]
+        else:
+            return data
+
+    async def _send_error_message(self, endpoint: dict, endpoint_name: str, error_content: str) -> None:
+        """
+        Send an error message to Matrix with the raw content wrapped in a code block.
+        """
+        try:
+            room = RoomID(endpoint.get('room_id'))
+            error_msg = f"**Webhook Error for endpoint '{endpoint_name}':**\n\n{error_content}"
+            
+            await self.client.send_markdown(room, error_msg, allow_html=True,
+                                            msgtype=MessageType.NOTICE)
+            self.log.info(f"Sent error message to Matrix for endpoint '{endpoint_name}'")
+        except Exception as e:
+            self.log.error(f"Failed to send error message to Matrix: {e}")
 
     @classmethod
     def get_config_class(cls) -> Type['BaseProxyConfig']:
