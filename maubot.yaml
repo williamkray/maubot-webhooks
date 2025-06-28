@@ -1,6 +1,6 @@
 maubot: 0.1.0
-id: nl.jeroenhd.json-webhookbot
-version: 1.0.3
+id: org.jobmachine.webhookbot
+version: 1.0.4
 license: MIT
 modules:
   - webhookbot

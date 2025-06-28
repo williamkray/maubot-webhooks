@@ -31,19 +31,47 @@ endpoints:
     template: 'Test data: ${user.name} is ${user.mood}'
     methods:
       - POST
+    auth_token: 'EndpointSpecificToken123'  # Single token
   anotherendpoint:
     notice: true
     room_id: '!......@.....'
     template: 'Test data: ${fromQuery}'
     methods:
       - GET
+    auth_token: 'AnotherEndpointToken456'  # Single token
+  multiuserendpoint:
+    notice: false
+    room_id: '!......@.....'
+    format: JSON
+    template: 'User ${user.name} sent: ${message}'
+    methods:
+      - POST
+    auth_token:  # Multiple tokens for different users
+      - 'User1Token789'
+      - 'User2Token012'
+      - 'User3Token345'
+
+# Authentication configuration
+enable_bearer_auth: true  # Enable Bearer token authentication in Authorization headers
+
 tokens:
  - authtoken1
  - authtoken2
 ```
 
-All webhooks are protected by tokens by default. All tokens work on all webhooks, though this may be reworked in the future.
-A call without a token will be ignored and logged.
+All webhooks are protected by tokens. You can use either:
+- **Global tokens** (defined in the `tokens` list) - work on all endpoints for backward compatibility
+- **Per-endpoint tokens** (defined as `auth_token` in each endpoint) - provide unique authentication per webhook
+
+**Per-endpoint tokens support two formats:**
+- **Single token**: `auth_token: 'MyToken123'` - only one token accepted
+- **Multiple tokens**: `auth_token: ['Token1', 'Token2', 'Token3']` - any of the listed tokens accepted
+
+**Token Delivery Methods:**
+- **Query Parameter** (default): `?token=MyToken123` - works for all endpoints
+- **Authorization Header** (optional): `Authorization: Bearer MyToken123` - requires `enable_bearer_auth: true`
+
+If an endpoint has an `auth_token` defined, it will only accept tokens from that list. Otherwise, it will accept any of the global tokens. A call without a token or with an invalid token will be ignored and logged.
 
 Endpoint `endpointname` can only be called through POST requests, accepts JSON as input (the only supported input type
 for POST requests at the moment) and sends notifications as normal text messages (those will generate a notification
@@ -62,13 +90,54 @@ You can call this webhook with the following data:
 
 The endpoint will be available at a URL relative to your maubot instance. For example, if you run maubot at
 https://matrix.example.org/_matrix/maubot/# and you call your maubot instance "webhookbot", the callback URL will be
-https://matrix.example.org/_matrix/maubot/plugin/webhookbot/post/endpointname?token=authtoken1
+https://matrix.example.org/_matrix/maubot/plugin/webhookbot/endpointname?token=EndpointSpecificToken123
+
+**Alternative with Bearer token** (if `enable_bearer_auth: true`):
+```bash
+curl -X POST https://matrix.example.org/_matrix/maubot/plugin/webhookbot/endpointname \
+  -H "Authorization: Bearer EndpointSpecificToken123" \
+  -H "Content-Type: application/json" \
+  -d '{"user": {"name": "John", "mood": "happy"}}'
+```
 
 The second endpoint, `anotherendpoint`, accepts data through a GET request. As there is no good way to encode JSON in a
 GET request, GET endpoints take data from the query string instead. The second endpoint sends messages as notices (usually
-means that no notifications will be sent). The callback URL for this endpoint will be https://matrix.example.org/_matrix/maubot/plugin/webhookbot/post/anotherendpoint?token=authtoken1&fromQuery=itworks123
+means that no notifications will be sent). The callback URL for this endpoint will be https://matrix.example.org/_matrix/maubot/plugin/webhookbot/anotherendpoint?token=AnotherEndpointToken456&fromQuery=itworks123
 
 The above call will send the message `Test data: itworks123` to the defined Matrix room.
+
+**Note:** Endpoints use a simplified URL structure without HTTP method prefixes (e.g., `/endpointname` instead of `/post/endpointname`). The allowed HTTP methods are determined by the endpoint configuration in your YAML file.
+
+## Bearer Token Authentication
+
+When `enable_bearer_auth: true` is set in your configuration, POST endpoints can accept tokens via the `Authorization` header using the Bearer scheme. This is useful for:
+
+- **Security**: Tokens are not exposed in URLs or server logs
+- **Standards compliance**: Follows OAuth 2.0 Bearer token standards
+- **Integration**: Works with many API clients and libraries that expect Bearer tokens
+
+**Example usage:**
+```bash
+# Using curl with Bearer token
+curl -X POST https://matrix.example.org/_matrix/maubot/plugin/webhookbot/endpointname \
+  -H "Authorization: Bearer YourTokenHere" \
+  -H "Content-Type: application/json" \
+  -d '{"data": "value"}'
+
+# Using Python requests
+import requests
+headers = {
+    'Authorization': 'Bearer YourTokenHere',
+    'Content-Type': 'application/json'
+}
+response = requests.post(
+    'https://matrix.example.org/_matrix/maubot/plugin/webhookbot/endpointname',
+    headers=headers,
+    json={'data': 'value'}
+)
+```
+
+**Note:** Bearer authentication is only available for POST endpoints. GET endpoints continue to use query parameter tokens for compatibility.
 
 ## Formatting
 Templates can be formatted through markdown, though the allow_html parameter has also been enabled in the code. Because
@@ -94,6 +163,13 @@ endpoints:
 
 ### Troubleshooting
 Errors will be logged to the maubot log. Info logs are used to indicate startup and to track calls to the endpoints.
+
+**Debug Logging**: The bot now includes comprehensive debug logging to help you troubleshoot endpoint configuration:
+- **POST requests**: Logs the raw request payload and parsed JSON structure
+- **GET requests**: Logs all query parameters (with token redacted for security)
+- **Message formatting**: Shows the final formatted message before sending to Matrix
+
+This makes it much easier to understand the structure of incoming webhook data and configure your templates accordingly.
 
 If something goes wrong and no error message is logged to the maubot log, check the docker/maubot server output!
 

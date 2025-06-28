@@ -1,0 +1,112 @@
+# save a copy of this as config.yaml and adjust to your liking
+# Bot account details
+user:
+    credentials:
+        id: "@bot:example.com"
+        homeserver: https://example.com
+        access_token: foo
+        # If you want to enable encryption, set the device ID corresponding to the access token here.
+        # When using an appservice, you should use appservice login manually to generate a device ID and access token.
+        device_id: null
+    # Enable /sync? This is not needed for purely unencrypted webhook-based bots, but is necessary in most other cases.
+    sync: true
+    # Receive appservice transactions? This will add a /_matrix/app/v1/transactions endpoint on
+    # the HTTP server configured below. The base_path will not be applied for the /transactions path.
+    appservice: false
+    # When appservice mode is enabled, the hs_token for the appservice.
+    hs_token: null
+    # Automatically accept invites?
+    autojoin: false
+    # The displayname and avatar URL to set for the bot on startup.
+    # Set to "disable" to not change the the current displayname/avatar.
+    displayname: disable
+    avatar_url: disable
+
+    # Should events from the initial sync be ignored? This should usually always be true.
+    ignore_initial_sync: true
+    # Should events from the first sync after starting be ignored? This can be set to false
+    # if you want the bot to handle messages that were sent while the bot was down.
+    ignore_first_sync: true
+
+# Web server settings. These will only take effect if the plugin requests it using `webapp: true` in the meta file,
+# or if user -> appservice is set to true.
+server:
+    # The IP and port to listen to.
+    hostname: 0.0.0.0
+    port: 8080
+    # The base path where the plugin's web resources will be served. Unlike the normal mode,
+    # the webserver is dedicated for a single bot in standalone mode, so the default path
+    # is just /. If you want to emulate normal mode, set this to /_matrix/maubot/plugin/something
+    base_path: /
+    # The public URL where the resources are available. The base path is automatically appended to this.
+    public_url: https://example.com
+
+# The database for the plugin. Used for plugin data, the sync token and e2ee data (if enabled).
+# SQLite and Postgres are supported.
+database: sqlite:/data/bot.db
+
+# Additional arguments for asyncpg.create_pool() or sqlite3.connect()
+# https://magicstack.github.io/asyncpg/current/api/index.html#asyncpg.pool.create_pool
+# https://docs.python.org/3/library/sqlite3.html#sqlite3.connect
+# For sqlite, min_size is used as the connection thread pool size and max_size is ignored.
+database_opts:
+    min_size: 1
+    max_size: 10
+
+# Config for the plugin. Refer to the plugin's base-config.yaml to find what (if anything) to put here.
+plugin_config: 
+  endpoints:
+    endpointname:
+      notice: false
+      room_id: '!......@.....'
+      format: JSON
+      template: 'Test data: ${user.name} is ${user.mood}'
+      methods:
+        - POST
+      auth_token: 'EndpointSpecificToken123'  # Single token
+    anotherendpoint:
+      notice: true
+      room_id: '!......@.....'
+      template: 'Test data: ${fromQuery}'
+      methods:
+        - GET
+      auth_token: 'AnotherEndpointToken456'  # Single token
+    multiuserendpoint:
+      notice: false
+      room_id: '!......@.....'
+      format: JSON
+      template: 'User ${user.name} sent: ${message}'
+      methods:
+        - POST
+      auth_token:  # Multiple tokens for different users
+        - 'User1Token789'
+        - 'User2Token012'
+        - 'User3Token345'
+
+  # Authentication configuration
+  enable_bearer_auth: true  # Enable Bearer token authentication in Authorization headers
+
+  tokens:
+    - SecretTokenReplaceMe  # Global tokens for backward compatibility
+
+# Standard Python logging configuration
+logging:
+    version: 1
+    formatters:
+        colored:
+            (): maubot.lib.color_log.ColorFormatter
+            format: "[%(asctime)s] [%(levelname)s@%(name)s] %(message)s"
+    handlers:
+        console:
+            class: logging.StreamHandler
+            formatter: colored
+    loggers:
+        maubot:
+            level: DEBUG
+        mau:
+            level: DEBUG
+        aiohttp:
+            level: INFO
+    root:
+        level: DEBUG
+        handlers: [console]

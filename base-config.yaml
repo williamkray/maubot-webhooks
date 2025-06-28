@@ -6,12 +6,28 @@ endpoints:
     template: 'Test data: ${user.name} is ${user.mood}'
     methods:
       - POST
+    auth_token: 'EndpointSpecificToken123'
   anotherendpoint:
     notice: true
     room_id: '!......@.....'
     template: 'Test data: ${fromQuery}'
     methods:
       - GET
+    auth_token: 'AnotherEndpointToken456'
+  multiuserendpoint:
+    notice: false
+    room_id: '!......@.....'
+    format: JSON
+    template: 'User ${user.name} sent: ${message}'
+    methods:
+      - POST
+    auth_token:
+      - 'User1Token789'
+      - 'User2Token012'
+      - 'User3Token345'
+
+# Authentication configuration
+enable_bearer_auth: true
 
 tokens:
   - SecretTokenReplaceMe
